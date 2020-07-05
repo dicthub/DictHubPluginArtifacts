@@ -1,0 +1,67 @@
+name: Update index.json of DictHubPluginRepository
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+
+    env:
+      REPO_USER_NAME: dicthub-plugin-publish
+      REPO_USER_EMAIL: 47938489+dicthub-plugin-publish@users.noreply.github.com
+      REPO_NAME: dicthub/DictHubPluginRepository
+      REPO_BRANCH: dev
+      REPO_PATH: ./index-repo
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        fetch-depth: 2 # include the previous commit id to diff
+    - name: Get updated plugins
+      shell: bash
+      run: |
+        updated_plugin=`git diff-tree --no-commit-id --name-only -r ${{ github.sha }} plugins/`
+        if [ ! -z "${updated_plugin}" ]; then
+          echo "Set PLUGIN_FILE to ${updated_plugin}"
+          echo "::set-env name=PLUGIN_FILE::${updated_plugin}"
+        else
+          echo "no updated PLUGIN_FILE found."
+        fi
+    - name: Checkout plugin index
+      shell: bash
+      if: env.PLUGIN_FILE != ''
+      run: |
+        remote_repo="https://${REPO_USER_NAME}:${REPO_PUBLISH_TOKEN}@github.com/${REPO_NAME}.git"
+        git clone ${remote_repo} -b ${REPO_BRANCH} ${REPO_PATH}
+    - name: Update plugin index
+      shell: bash
+      working-directory: ${{ env.REPO_PATH }}
+      if: env.PLUGIN_FILE != ''
+      run: |
+        old_version=`grep --text ${PLUGIN_FILE} index.json | rev | cut -d '/' -f 3 | rev`
+        echo "Replacing ${old_version} to ${GITHUB_SHA}"
+        sed -i "s/${old_version}/${GITHUB_SHA}/g" index.json
+        # for migration
+        sed -i "s/DictHubPluginRepository\/${GITHUB_SHA}/DictHubPluginArtifacts\/${GITHUB_SHA}/g" index.json
+        git add index.json
+        git diff --cached
+    - name: Commit plugin index
+      working-directory: ${{ env.REPO_PATH }}
+      if: env.PLUGIN_FILE != ''
+      shell: bash
+      run: |
+        git config --local user.email "${REPO_USER_EMAIL}"
+        git config --local user.name "${REPO_USER_NAME}"
+        git commit -m "Update ${PLUGIN_FILE} to ${GITHUB_REPOSITORY}@${GITHUB_SHA}"
+    - name: Push changes
+      working-directory: ${{ env.REPO_PATH }}
+      if: env.PLUGIN_FILE != ''
+      env:
+        REPO_PUBLISH_TOKEN: ${{ secrets.REPO_PUBLISH_TOKEN }}
+      shell: bash
+      run: |
+        remote_repo="https://${REPO_USER_NAME}:${REPO_PUBLISH_TOKEN}@github.com/${REPO_NAME}.git"
+        git push "${remote_repo}" HEAD:${REPO_BRANCH}
